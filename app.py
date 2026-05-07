@@ -40,6 +40,7 @@ metrics = {
     "request_duration_seconds": 0.0,
     "chat_completions_total": 0,
     "chat_stream_total": 0,
+    "embeddings_total": 0,
     "model_operations_total": 0,
     "audio_transcribe_total": 0,
     "audio_speak_total": 0,
@@ -286,6 +287,41 @@ def audio_speak():
             pass
 
     return jsonify({"audio_base64": encoded})
+
+
+@app.route("/v1/embeddings", methods=["POST"])
+@require_api_key
+def embeddings():
+    metrics["embeddings_total"] += 1
+    payload = request.get_json(force=True)
+    model_id = payload.get("model", model_registry.get_default_model())
+    texts = payload.get("input") if payload.get("input") is not None else payload.get("inputs")
+
+    if texts is None:
+        return jsonify({"error": {"message": "`input` or `inputs` is required."}}), 400
+    if isinstance(texts, str):
+        texts = [texts]
+    if not isinstance(texts, list) or not texts or not all(isinstance(item, str) for item in texts):
+        return jsonify({"error": {"message": "`input` or `inputs` must be a non-empty string or string list."}}), 400
+
+    if not model_registry.model_exists(model_id):
+        return jsonify({"error": {"message": "Model not registered."}}), 404
+
+    try:
+        embeddings = model_manager.embeddings(model_id=model_id, texts=texts)
+    except Exception as exc:
+        logger.exception("Embedding generation failed: %s", exc)
+        return jsonify({"error": {"message": str(exc)}}), 500
+
+    return jsonify({
+        "object": "list",
+        "data": [
+            {"object": "embedding", "embedding": vector, "index": idx}
+            for idx, vector in enumerate(embeddings)
+        ],
+        "model": model_id,
+        "usage": {"prompt_tokens": 0, "total_tokens": 0},
+    })
 
 
 @app.route("/v1/chats", methods=["GET"])

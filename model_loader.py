@@ -1,8 +1,8 @@
 import threading
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, List
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 
 try:
     from transformers import TextIteratorStreamer
@@ -56,6 +56,64 @@ class ModelManager:
             "tokenizer": tokenizer,
         }
         return self.loaded_models[model_id]
+
+    def _load_embedding_model(self, model_id: str, path: str) -> dict[str, Any]:
+        if model_id in self.loaded_models and "embed_model" in self.loaded_models[model_id]:
+            return self.loaded_models[model_id]
+
+        if model_id not in self.loaded_models:
+            self.load_model(model_id)
+
+        try:
+            embed_model = AutoModel.from_pretrained(
+                path,
+                torch_dtype="auto",
+                device_map="auto" if torch.cuda.is_available() else None,
+            )
+        except Exception:
+            embed_model = AutoModelForCausalLM.from_pretrained(
+                path,
+                torch_dtype="auto",
+                device_map="auto" if torch.cuda.is_available() else None,
+            )
+
+        tokenizer = AutoTokenizer.from_pretrained(path, use_fast=True)
+        self.loaded_models[model_id]["embed_model"] = embed_model
+        self.loaded_models[model_id]["embed_tokenizer"] = tokenizer
+        return self.loaded_models[model_id]
+
+    def _get_embeddings_from_model(self, model, tokenizer, texts: List[str]) -> List[List[float]]:
+        inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        embeddings = None
+        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            embeddings = outputs.pooler_output
+        elif hasattr(outputs, "last_hidden_state"):
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+        else:
+            raise RuntimeError("Unable to derive embeddings from this model.")
+
+        return embeddings.cpu().tolist()
+
+    def embeddings(self, model_id: str, texts: List[str]) -> List[List[float]]:
+        model_info = self.registry.get_model(model_id) or {
+            "model_id": model_id,
+            "path": model_id,
+            "model_type": "huggingface",
+            "source": "huggingface",
+        }
+        path = model_info["path"]
+        model_data = self._load_embedding_model(model_id, path)
+        return self._get_embeddings_from_model(
+            model_data["embed_model"],
+            model_data["embed_tokenizer"],
+            texts,
+        )
 
     def _load_gguf(self, model_id: str, path: str) -> dict[str, Any]:
         if not HAS_LLAMA_CPP:

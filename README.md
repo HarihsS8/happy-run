@@ -74,6 +74,7 @@ python cli.py model default phi-4-multimodal
 - `DELETE /v1/chat/<chat_id>` — delete a chat session
 - `POST /v1/chat/completions` — generate a chat completion
 - `POST /v1/chat/stream` — stream completion chunks via SSE
+- `POST /v1/embeddings` — generate text embeddings for a model
 
 ## Notes
 
