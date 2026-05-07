@@ -72,8 +72,8 @@ python cli.py model default phi-4-multimodal
 - `GET /v1/chats` — list saved chat sessions
 - `GET /v1/chat/<chat_id>` — retrieve chat history
 - `DELETE /v1/chat/<chat_id>` — delete a chat session
-- `POST /v1/chat/completions` — generate a chat completion
-- `POST /v1/chat/stream` — stream completion chunks via SSE
+- `POST /v1/chat/completions` — generate a chat completion (supports tools for agent compatibility)
+- `POST /v1/chat/stream` — stream completion chunks via SSE (supports tools)
 - `POST /v1/embeddings` — generate text embeddings for a model
 
 ## Notes
@@ -84,4 +84,5 @@ python cli.py model default phi-4-multimodal
 - Model metadata is persisted to `model_registry.db`.
 - If `API_KEY` is set, all `/v1/*` endpoints require `Authorization: Bearer <token>`.
 - If `HUGGINGFACE_TOKEN` is set, installs may access private Hugging Face repos.
+- Chat completions support `tools` parameter for AI agent compatibility (JSON tool calling).
 - Running larger models may require GPU memory and additional setup.

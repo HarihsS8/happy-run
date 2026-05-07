@@ -358,6 +358,7 @@ def chat_completions():
     top_p = float(payload.get("top_p", 0.95))
     new_chat = bool(payload.get("new_chat", False))
     chat_id = payload.get("chat_id")
+    tools = payload.get("tools")
 
     if not model_registry.model_exists(model_id):
         return jsonify({"error": {"message": "Model not registered."}}), 404
@@ -373,18 +374,24 @@ def chat_completions():
 
     chat_store.add_messages(chat_id, messages)
     all_messages = chat_store.get_messages(chat_id)
-    prompt = model_manager.format_messages_to_prompt(all_messages)
+    prompt = model_manager.format_messages_with_tools(all_messages, tools)
     output = model_manager.generate(
         model_id=model_id,
         prompt=prompt,
         max_tokens=max_tokens,
         temperature=temperature,
         top_p=top_p,
+        tools=tools,
     )
 
+    tool_calls = model_manager.parse_tool_calls(output) if tools else None
     assistant_message = {"role": "assistant", "content": output}
+    if tool_calls:
+        assistant_message["tool_calls"] = tool_calls
+
     chat_store.add_messages(chat_id, [assistant_message])
 
+    finish_reason = "tool_calls" if tool_calls else "stop"
     response = {
         "id": f"chatcmpl-{int(time.time() * 1000)}",
         "object": "chat.completion",
@@ -394,8 +401,8 @@ def chat_completions():
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": output},
-                "finish_reason": "stop",
+                "message": assistant_message,
+                "finish_reason": finish_reason,
             }
         ],
         "usage": {
@@ -419,6 +426,7 @@ def chat_stream():
     top_p = float(payload.get("top_p", 0.95))
     new_chat = bool(payload.get("new_chat", False))
     chat_id = payload.get("chat_id")
+    tools = payload.get("tools")
 
     if not model_registry.model_exists(model_id):
         return jsonify({"error": {"message": "Model not registered."}}), 404
@@ -434,7 +442,7 @@ def chat_stream():
 
     chat_store.add_messages(chat_id, messages)
     all_messages = chat_store.get_messages(chat_id)
-    prompt = model_manager.format_messages_to_prompt(all_messages)
+    prompt = model_manager.format_messages_with_tools(all_messages, tools)
 
     def event_stream():
         output = ""
@@ -444,11 +452,16 @@ def chat_stream():
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
+            tools=tools,
         ):
             output += chunk
             yield f"data: {chunk}\n\n"
 
+        tool_calls = model_manager.parse_tool_calls(output) if tools else None
         assistant_message = {"role": "assistant", "content": output}
+        if tool_calls:
+            assistant_message["tool_calls"] = tool_calls
+
         chat_store.add_messages(chat_id, [assistant_message])
         yield "event: done\ndata: [DONE]\n\n"
 

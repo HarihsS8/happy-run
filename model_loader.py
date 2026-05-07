@@ -1,5 +1,6 @@
+import json
 import threading
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import torch
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
@@ -115,6 +116,38 @@ class ModelManager:
             texts,
         )
 
+    def format_messages_with_tools(self, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]] = None) -> str:
+        if not tools:
+            return self.format_messages_to_prompt(messages)
+
+        # Add tools to system message or create one
+        system_content = "You are a helpful assistant with access to tools. When you need to use a tool, respond with a JSON object containing 'tool_calls'."
+        system_content += "\n\nAvailable tools:\n" + "\n".join([
+            f"- {tool['function']['name']}: {tool['function']['description']}"
+            for tool in tools
+        ])
+
+        has_system = any(msg.get("role") == "system" for msg in messages)
+        if not has_system:
+            messages = [{"role": "system", "content": system_content}] + messages
+        else:
+            for msg in messages:
+                if msg.get("role") == "system":
+                    msg["content"] = system_content + "\n\n" + msg["content"]
+                    break
+
+        return self.format_messages_to_prompt(messages)
+
+    def parse_tool_calls(self, text: str) -> Optional[list[dict[str, Any]]]:
+        # Try to parse JSON tool calls from the response
+        try:
+            data = json.loads(text.strip())
+            if "tool_calls" in data and isinstance(data["tool_calls"], list):
+                return data["tool_calls"]
+        except json.JSONDecodeError:
+            pass
+        return None
+
     def _load_gguf(self, model_id: str, path: str) -> dict[str, Any]:
         if not HAS_LLAMA_CPP:
             raise RuntimeError("GGUF models require llama-cpp-python. Install it in requirements.")
@@ -147,6 +180,7 @@ class ModelManager:
         max_tokens: int = 512,
         temperature: float = 0.8,
         top_p: float = 0.95,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> str:
         model_data = self.load_model(model_id)
         if model_data["type"] == "gguf":
@@ -161,6 +195,7 @@ class ModelManager:
         max_tokens: int = 512,
         temperature: float = 0.8,
         top_p: float = 0.95,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> Iterator[str]:
         model_data = self.load_model(model_id)
         if model_data["type"] == "gguf":
